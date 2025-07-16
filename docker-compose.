@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  # Serviço de Descoberta (Eureka)
+  discovery-service:
+    image: openjdk:17-jdk-slim
+    container_name: discovery-service
+    ports:
+      - "8761:8761"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    volumes:
+      - ./service-discovery/target:/app
+    working_dir: /app
+    command: java -jar *.jar
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8761/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # API Gateway
+  api-gateway:
+    image: openjdk:17-jdk-slim
+    container_name: api-gateway
+    ports:
+      - "8700:8700"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE=http://discovery-service:8761/eureka
+    depends_on:
+      discovery-service:
+        condition: service_healthy
+    volumes:
+      - ./api-gateway/target:/app
+    working_dir: /app
+    command: java -jar *.jar
+
+  # Serviço de Produtos
+  produto-service:
+    image: openjdk:17-jdk-slim
+    container_name: produto-service
+    ports:
+      - "8100:8100"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE=http://discovery-service:8761/eureka
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://db-produto:5432/produto_db
+      - SPRING_DATASOURCE_USERNAME=admin
+      - SPRING_DATASOURCE_PASSWORD=secret
+    depends_on:
+      discovery-service:
+        condition: service_healthy
+      db-produto:
+        condition: service_healthy
+    volumes:
+      - ./produto-service/target:/app
+    working_dir: /app
+    command: java -jar *.jar
+
+  # Serviço de Pedidos
+  pedido-service:
+    image: openjdk:17-jdk-slim
+    container_name: pedido-service
+    ports:
+      - "8200:8200"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE=http://discovery-service:8761/eureka
+      - PRODUTO_SERVICE_URL=http://produto-service:8100
+    depends_on:
+      discovery-service:
+        condition: service_healthy
+      produto-service:
+        condition: service_healthy
+    volumes:
+      - ./pedido-service/target:/app
+    working_dir: /app
+    command: java -jar *.jar
+
+  # Banco de Dados para Produto Service
+  db-produto:
+    image: postgres:13-alpine
+    container_name: db-produto
+    environment:
+      - POSTGRES_DB=produto_db
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - produto-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  produto-data:
